@@ -84,6 +84,8 @@ export const api = {
     request<unknown>('POST', '/engine/stop', { sessionId }),
   engineStatus: () =>
     request<EngineStatusResult>('GET', '/engine/status'),
+  engineLastSignal: (symbol: string) =>
+    request<HmmAdvisory>('GET', `/engine/last-signal?symbol=${encodeURIComponent(symbol)}`),
 
   // Aggressive Engine
   aggressiveStart:  (body: AggressiveStartRequest) =>
@@ -115,11 +117,14 @@ export const api = {
     volume:               body.volume,
     profitTarget:         body.profitTarget,
     hardSlPips:           body.hardSlPips,
+    slLossMultiplier:     body.slLossMultiplier,
     maxPositions:         body.maxPositions,
     evalInterval:         body.evalInterval,
     mcLevelPct:           body.mcLevelPct,
     safetyMultiplier:     body.safetyMultiplier,
     emergencyMultiplier:  body.emergencyMultiplier,
+    maxSessionLossUsd:    body.maxSessionLossUsd,
+    maxDrawdownFromPeak:  body.maxDrawdownFromPeak,
   }),
   cascadeStop:   (sessionId: string)           => request<unknown>('POST', '/cascade/stop', { sessionId }),
   cascadeStatus: ()                            => request<CascadeStatusResult>('GET', '/cascade/status'),
@@ -191,7 +196,8 @@ export interface EngineSession {
   session_id: string; theory_id: string; instrument: string; timeframe: string
   direction: string; status: 'running' | 'stopped' | 'error'
   started_at: string; last_checked: string | null; last_signal: string | null
-  signals_fired: number; error_msg: string | null
+  signals_fired: number; bars_evaluated: number; no_signal_warning: boolean
+  error_msg: string | null
 }
 export interface EngineStatusResult { sessions: EngineSession[] }
 export interface EvaluateResult { decision: string; compositeScore: number; pWin: number; stateSeqRepr: string; tradeLogId: string | null }
@@ -209,6 +215,16 @@ export interface MT5CloseResult { success: boolean; ticket: number; retcode: num
 export interface MT5CloseAllResult { closed: number; failed: number; totalProfit: number }
 
 // Aggressive Engine types
+export interface HmmAdvisory {
+  found: boolean
+  symbol: string
+  direction: string        // LONG | SHORT
+  similarity: number
+  age_s: number
+  timeframe: string
+  session_id: string
+}
+
 export interface AggressiveStartRequest {
   symbol: string; direction: string; layers: number
   volume: number; profitTarget: number; slPips: number; tpPips: number
@@ -217,6 +233,8 @@ export interface AggressiveStartRequest {
   trendGuided: boolean
   mcGuard: boolean; mcLevelPct: number; safetyMultiplier: number; emergencyMultiplier: number
   slLossMultiplier: number
+  slCooldownSec: number
+  maxSessionLossUsd: number; maxDrawdownFromPeak: number
 }
 export interface AggressiveStartResult { session_id: string; status: string }
 export interface AggressiveSession {
@@ -229,6 +247,11 @@ export interface AggressiveSession {
   mc_guard: boolean; mc_level_pct: number; safety_multiplier: number; emergency_multiplier: number
   mc_status: 'OK' | 'CAUTION' | 'WARNING' | 'DANGER' | 'EMERGENCY'
   sl_loss_multiplier: number
+  sl_cooldown_sec: number; sl_cooldown_remaining: number
+  max_session_loss_usd: number; max_drawdown_from_peak: number
+  peak_profit: number; floating_pnl: number; total_net: number
+  next_recommendation: string
+  consecutive_connection_failures: number
   active: boolean; open_positions: number; active_tickets: number[]
   total_opened: number; total_closed_win: number; total_closed_other: number
   total_closed_sl: number; total_closed_emergency: number
@@ -242,6 +265,7 @@ export interface SmartStartRequest {
   openPerInterval: number; evalIntervalS: number; volume: number
   tpAtrMult: number; slAtrMult: number; minAtr: number; maxAtr: number
   minConfidence: number
+  allowShort: boolean
   aiEnabled: boolean; entriesPerDecision: number; maxCallsPerHour: number
 }
 export interface SmartStartResult { session_id: string; status: string; ai_enabled: boolean }
@@ -253,6 +277,7 @@ export interface SmartSession {
   active: boolean; open_positions: number; active_tickets: number[]
   total_opened: number; total_closed_win: number; total_closed_loss: number; total_closed_other: number
   total_profit: number; last_action: string; last_direction: string; last_score: number
+  allow_short: boolean
   error: string | null; uptime_s: number
   // AI fields
   ai_enabled: boolean; ai_status: string
@@ -283,9 +308,10 @@ export interface SmartTradeStats {
 export interface CascadeStartRequest {
   symbol: string
   initialBatch: number; topupBatch: number
-  volume: number; profitTarget: number; hardSlPips: number
+  volume: number; profitTarget: number; hardSlPips: number; slLossMultiplier: number
   maxPositions: number; evalInterval: number
   mcLevelPct: number; safetyMultiplier: number; emergencyMultiplier: number
+  maxSessionLossUsd: number; maxDrawdownFromPeak: number
 }
 export interface CascadeBatch {
   batch_id: string; direction: string; open: number
@@ -295,9 +321,12 @@ export type McStatus = 'OK' | 'CAUTION' | 'WARNING' | 'DANGER' | 'EMERGENCY'
 export interface CascadeSession {
   session_id: string; symbol: string
   initial_batch: number; topup_batch: number
-  volume: number; profit_target: number; hard_sl_pips: number
+  volume: number; profit_target: number; hard_sl_pips: number; sl_loss_multiplier: number
   max_positions: number; eval_interval: number
   mc_level_pct: number; safety_multiplier: number; emergency_multiplier: number
+  max_session_loss_usd: number; max_drawdown_from_peak: number
+  peak_profit: number; floating_pnl: number; total_net: number
+  next_recommendation: string
   active: boolean; mc_status: McStatus; current_direction: string
   open_positions: number
   total_opened: number; total_closed_tp: number; total_closed_sl: number; total_closed_emergency: number
